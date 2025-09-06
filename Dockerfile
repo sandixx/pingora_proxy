@@ -30,6 +30,9 @@ RUN strip target/x86_64-unknown-linux-musl/release/pingora_proxy
 # ---- Runtime stage ----
 FROM gcr.io/distroless/static-debian12:nonroot
 
+# Copy zoneinfo data from builder stage
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
 WORKDIR /app
 COPY --from=builder /usr/src/app/target/x86_64-unknown-linux-musl/release/pingora_proxy /app/pingora_proxy
 
