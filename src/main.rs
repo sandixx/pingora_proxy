@@ -7,19 +7,27 @@ use pingora_proxy::{ProxyHttp, Session};
 use std::env;
 use dotenvy::dotenv;
 use pingora_core::server::configuration::Opt;
+use std::collections::HashMap;
+use pingora_core::server::Server;
+use pingora_proxy::http_proxy_service;
+use structopt::StructOpt;
 
 pub struct MyProxy {
     target_host: String,
     target_port: u16,
     ssl_enabled: bool,
+    custom_headers: HashMap<String, String>,
+    remove_headers: Vec<String>,
 }
 
 impl MyProxy {
-    pub fn new(target_host: String, target_port: u16, ssl_enabled: bool) -> Self {
+    pub fn new(target_host: String, target_port: u16, ssl_enabled: bool, custom_headers: HashMap<String, String>, remove_headers: Vec<String>, ) -> Self {
         MyProxy {
             target_host,
             target_port,
             ssl_enabled,
+            custom_headers,
+            remove_headers,
         }
     }
 }
@@ -81,17 +89,18 @@ impl ProxyHttp for MyProxy {
         Ok(peer)
     }
 
-    async fn response_filter(&self, _session: &mut Session, upstream_response: &mut ResponseHeader, _ctx: &mut Self::CTX) -> Result<()> {
-        upstream_response.insert_header("X-Proxy-Server", "Pingora")?;
-        upstream_response.insert_header("X-Proxy-Version", "1.0")?;
-        upstream_response.remove_header("Server");
+    async fn response_filter(&self,_session: &mut Session, upstream_response: &mut ResponseHeader,_ctx: &mut Self::CTX,) -> Result<()> {
+        for key in &self.remove_headers {
+            upstream_response.remove_header(key.as_str());
+        }
+
+        for (key, value) in &self.custom_headers {
+            upstream_response.insert_header(key.clone(), value.clone())?;
+        }
+
         Ok(())
     }
 }
-
-use pingora_core::server::Server;
-use pingora_proxy::http_proxy_service;
-use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "pingora-proxy")]
@@ -124,12 +133,41 @@ fn load_config() -> (u16, String, u16, bool, String, String) {
     (proxy_port, target_host, target_port, ssl_enabled, ssl_cert, ssl_key)
 }
 
+fn load_custom_headers() -> HashMap<String, String> {
+    let mut headers = HashMap::new();
+    if let Ok(val) = env::var("CUSTOM_HEADER") {
+        match serde_json::from_str::<HashMap<String, String>>(&val) {
+            Ok(map) => headers = map,
+            Err(e) => {
+                log::warn!("⚠️ Failed to parse CUSTOM_HEADER env: {} (value={})", e, val);
+            }
+        }
+    }
+    headers
+}
+
+fn load_remove_headers() -> Vec<String> {
+    if let Ok(val) = env::var("REMOVE_HEADER") {
+        match serde_json::from_str::<Vec<String>>(&val) {
+            Ok(list) => list,
+            Err(e) => {
+                log::warn!("⚠️ Failed to parse REMOVE_HEADER env: {} (value={})", e, val);
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    }
+}
+
 fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     dotenv().ok();
-    
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
     let args = Args::from_args();
     let (default_proxy_port, default_target_host, default_target_port, ssl_enabled, ssl_cert, ssl_key) = load_config();
+    let custom_headers = load_custom_headers();
+    let remove_headers = load_remove_headers();
 
     let proxy_port = args.proxy_port.unwrap_or(default_proxy_port);
     let target_host = args.target_host.unwrap_or(default_target_host);
@@ -154,7 +192,7 @@ fn main() {
     let mut my_server = Server::new(server_opt).unwrap();
     my_server.bootstrap();
 
-    let proxy = MyProxy::new(target_host.clone(), target_port, ssl_enabled);
+    let proxy = MyProxy::new(target_host.clone(), target_port, ssl_enabled, custom_headers, remove_headers);
     let mut proxy_service = http_proxy_service(&my_server.configuration, proxy);
     
     if ssl_enabled {
