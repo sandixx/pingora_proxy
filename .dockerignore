@@ -1,0 +1,7 @@
+target/
+.env
+.env example
+.git/
+.gitignore
+ssl/*.pem
+ssl/*.key
