@@ -54,7 +54,7 @@ impl HealthChecker {
                     }
                     Err(e) => {
                         if backend.healthy {
-                            warn!("❌ Backend {}:{} health check failed: {}", backend.host, backend.port, e);
+                            warn!("❌ Backend url: {} health check failed: {}", url, e);
                             backend.healthy = false;
                         }
                         backend.last_checked = Some(Instant::now());
