@@ -35,6 +35,7 @@ impl HealthChecker {
             
             let mut backends_write = backends.write().await;
             for backend in backends_write.iter_mut() {
+                // Direct URL construction - Docker handles the resolution
                 let url = format!("http://{}:{}{}", backend.host, backend.port, config.path);
 
                 match client.get(&url).send().await {

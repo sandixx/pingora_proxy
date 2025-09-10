@@ -113,10 +113,18 @@ pub fn load_health_check_config() -> HealthCheckConfig {
 pub fn load_custom_headers() -> HashMap<String, String> {
     let mut headers = HashMap::new();
     if let Ok(val) = env::var("CUSTOM_HEADER") {
-        match serde_json::from_str::<HashMap<String, String>>(&val) {
+        // Remove any surrounding quotes
+        let trimmed_val = val.trim_matches('"');
+        match serde_json::from_str::<HashMap<String, String>>(trimmed_val) {
             Ok(map) => headers = map,
             Err(e) => {
                 log::warn!("⚠️ Failed to parse CUSTOM_HEADER env: {} (value={})", e, val);
+                // Fallback: try to parse as simple key:value pair
+                if let Some(colon_pos) = trimmed_val.find(':') {
+                    let key = trimmed_val[..colon_pos].trim().to_string();
+                    let value = trimmed_val[colon_pos+1..].trim().to_string();
+                    headers.insert(key, value);
+                }
             }
         }
     }
@@ -125,11 +133,17 @@ pub fn load_custom_headers() -> HashMap<String, String> {
 
 pub fn load_remove_headers() -> Vec<String> {
     if let Ok(val) = env::var("REMOVE_HEADER") {
-        match serde_json::from_str::<Vec<String>>(&val) {
+        // Remove any surrounding quotes
+        let trimmed_val = val.trim_matches('"');
+        match serde_json::from_str::<Vec<String>>(trimmed_val) {
             Ok(list) => list,
             Err(e) => {
                 log::warn!("⚠️ Failed to parse REMOVE_HEADER env: {} (value={})", e, val);
-                Vec::new()
+                // Fallback: try to parse as comma-separated list
+                trimmed_val.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
             }
         }
     } else {
