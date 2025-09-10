@@ -1,4 +1,3 @@
-use dotenvy::dotenv;
 use log::{info, warn};
 use pingora_core::server::configuration::Opt;
 use pingora_core::server::Server;
@@ -10,10 +9,12 @@ use tokio::sync::RwLock;
 mod backend;
 mod config;
 mod health_check;
+mod load_balancer;
 mod proxy;
 
 use config::*;
 use health_check::HealthChecker;
+use load_balancer::LoadBalancer;
 use proxy::MyProxy;
 
 #[derive(StructOpt, Debug)]
@@ -27,7 +28,7 @@ struct Args {
 }
 
 fn main() {
-    dotenv().ok();
+    dotenvy::from_filename(".env").expect("⚠️ .env file not found!");
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let args = Args::from_args();
@@ -37,21 +38,22 @@ fn main() {
     let ssl_cert = get_ssl_cert();
     let ssl_key = get_ssl_key();
 
-    let (backends, round_robin) = load_backends(); // Updated to return tuple
+    let backends = load_backends();
     let custom_headers = load_custom_headers();
     let remove_headers = load_remove_headers();
     let health_check_config = load_health_check_config();
+    let load_balance_strategy = load_balance_strategy();
+    let sticky_cookie_name = load_sticky_cookie_name();
+    let sticky_session_ttl = config::load_sticky_session_ttl();
 
-    // Convert backends to thread-safe structure
     let shared_backends = Arc::new(RwLock::new(backends));
+    let load_balancer = Arc::new(LoadBalancer::new(load_balance_strategy));
 
-    // Create a runtime for the health check service
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap();
 
-    // Start health check service in a separate thread
     let health_backends = shared_backends.clone();
     let health_config = health_check_config.clone();
     std::thread::spawn(move || {
@@ -62,7 +64,6 @@ fn main() {
 
     info!("🔍 Testing initial connection to upstreams...");
     {
-        // Use a simple blocking check for initial connection test
         for b in shared_backends.blocking_read().iter() {
             match std::net::TcpStream::connect(format!("{}:{}", b.host, b.port)) {
                 Ok(_) => info!("✅ {}:{} is reachable", b.host, b.port),
@@ -71,7 +72,7 @@ fn main() {
                         "⚠️ Cannot connect to upstream {}:{}: {} (will be marked unhealthy)",
                         b.host, b.port, e
                     );
-                    // Mark as unhealthy in the shared state
+                    
                     let mut backends_write = shared_backends.blocking_write();
                     if let Some(backend) = backends_write.iter_mut().find(|be| be.host == b.host && be.port == b.port) {
                         backend.healthy = false;
@@ -94,11 +95,12 @@ fn main() {
 
     let proxy = MyProxy {
         backends: shared_backends,
+        load_balancer,
         ssl_enabled,
         custom_headers,
         remove_headers,
-        counter: std::sync::atomic::AtomicUsize::new(0),
-        round_robin, // Add this field
+        sticky_cookie_name,
+        sticky_session_ttl,
     };
 
     let mut proxy_service = http_proxy_service(&my_server.configuration, proxy);
