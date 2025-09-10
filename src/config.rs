@@ -7,7 +7,7 @@ use crate::health_check::HealthCheckConfig;
 
 pub fn load_backends() -> (Vec<Backend>, bool) {
     let mut backends = Vec::new();
-    let balance_enabled = env::var("BACKENDS_BALANCE")
+    let balance_enabled = env::var("ROUND_ROBIN")
         .unwrap_or_else(|_| "OFF".to_string())
         .to_uppercase() == "ON";
 
