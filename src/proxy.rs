@@ -116,13 +116,17 @@ impl ProxyHttp for MyProxy {
             let expire_time = Utc::now() + Duration::seconds(self.sticky_session_ttl as i64);
             let expires_str = expire_time.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
 
-            let cookie_value = format!(
+            let mut cookie_value = format!(
                 "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}; Expires={}",
                 self.sticky_cookie_name,
                 session_id,
                 self.sticky_session_ttl,
                 expires_str
             );
+
+            if self.ssl_enabled {
+                cookie_value.push_str("; Secure");
+            }
 
             upstream_response.insert_header("Set-Cookie", cookie_value)?;
         }
