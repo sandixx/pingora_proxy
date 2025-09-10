@@ -87,8 +87,6 @@ impl ProxyHttp for MyProxy {
     }
 
     async fn request_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<bool> {
-        session.req_header_mut().insert_header("X-Forwarded-By", "Pingora-Proxy")?;
-
         let proto = if self.ssl_enabled { "https" } else { "http" };
         session.req_header_mut().insert_header("X-Forwarded-Proto", proto)?;
 
