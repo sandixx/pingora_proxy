@@ -37,7 +37,7 @@ fn main() {
     let ssl_cert = get_ssl_cert();
     let ssl_key = get_ssl_key();
 
-    let backends = load_backends();
+    let (backends, round_robin) = load_backends(); // Updated to return tuple
     let custom_headers = load_custom_headers();
     let remove_headers = load_remove_headers();
     let health_check_config = load_health_check_config();
@@ -67,14 +67,15 @@ fn main() {
             match std::net::TcpStream::connect(format!("{}:{}", b.host, b.port)) {
                 Ok(_) => info!("✅ {}:{} is reachable", b.host, b.port),
                 Err(e) => {
-                    warn!("⚠️ Cannot connect to upstream {}:{}: {} (will be marked unhealthy)", b.host, b.port, e);
-                    std::process::exit(1);
-
+                    warn!(
+                        "⚠️ Cannot connect to upstream {}:{}: {} (will be marked unhealthy)",
+                        b.host, b.port, e
+                    );
                     // Mark as unhealthy in the shared state
-                    // let mut backends_write = shared_backends.blocking_write();
-                    // if let Some(backend) = backends_write.iter_mut().find(|be| be.host == b.host && be.port == b.port) {
-                    //     backend.healthy = false;
-                    // }
+                    let mut backends_write = shared_backends.blocking_write();
+                    if let Some(backend) = backends_write.iter_mut().find(|be| be.host == b.host && be.port == b.port) {
+                        backend.healthy = false;
+                    }
                 }
             }
         }
@@ -97,6 +98,7 @@ fn main() {
         custom_headers,
         remove_headers,
         counter: std::sync::atomic::AtomicUsize::new(0),
+        round_robin, // Add this field
     };
 
     let mut proxy_service = http_proxy_service(&my_server.configuration, proxy);

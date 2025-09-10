@@ -1,12 +1,16 @@
 use std::env;
 use std::collections::HashMap;
-use log;
+use log::{self, info};
 
 use crate::backend::Backend;
 use crate::health_check::HealthCheckConfig;
 
-pub fn load_backends() -> Vec<Backend> {
+pub fn load_backends() -> (Vec<Backend>, bool) {
     let mut backends = Vec::new();
+    let balance_enabled = env::var("BACKENDS_BALANCE")
+        .unwrap_or_else(|_| "OFF".to_string())
+        .to_uppercase() == "ON";
+
     if let Ok(val) = env::var("BACKENDS") {
         for entry in val.split(',') {
             let parts: Vec<&str> = entry.split(':').collect();
@@ -14,7 +18,10 @@ pub fn load_backends() -> Vec<Backend> {
             // Handle different formats: host:port or host:port:weight
             if parts.len() >= 2 {
                 if let Ok(port) = parts[1].parse::<u16>() {
-                    let weight = if parts.len() == 3 {
+                    let weight = if balance_enabled {
+                        // In round-robin mode, all backends get equal weight
+                        1
+                    } else if parts.len() == 3 {
                         parts[2].parse::<usize>().unwrap_or(100)
                     } else {
                         100 // Default weight if not specified
@@ -36,22 +43,36 @@ pub fn load_backends() -> Vec<Backend> {
         panic!("❌ BACKENDS must be set and not empty!");
     }
 
-    // If there's only one backend, set its weight to 100
-    if backends.len() == 1 {
-        backends[0].weight = 100;
+    if balance_enabled {
+        // In round-robin mode, set all weights to equal values that sum to 100
+        let equal_weight = 100 / backends.len();
+        let remainder = 100 % backends.len();
+        
+        for (i, backend) in backends.iter_mut().enumerate() {
+            backend.weight = if i < remainder { equal_weight + 1 } else { equal_weight };
+        }
+        
+        info!("🔀 Round-robin load balancing enabled (equal weights)");
     } else {
-        // Only normalize weights if there are multiple backends
-        let total: usize = backends.iter().map(|b| b.weight).sum();
-        if total != 100 {
-            log::warn!("⚠️ BACKENDS weights sum to {} instead of 100 (auto-normalizing)", total);
-            let factor = 100.0 / (total as f64);
-            for b in backends.iter_mut() {
-                b.weight = ((b.weight as f64) * factor).round() as usize;
+        // If there's only one backend, set its weight to 100
+        if backends.len() == 1 {
+            backends[0].weight = 100;
+        } else {
+            // Only normalize weights if there are multiple backends
+            let total: usize = backends.iter().map(|b| b.weight).sum();
+            if total != 100 {
+                log::warn!("⚠️ BACKENDS weights sum to {} instead of 100 (auto-normalizing)", total);
+                let factor = 100.0 / (total as f64);
+                for b in backends.iter_mut() {
+                    b.weight = ((b.weight as f64) * factor).round() as usize;
+                }
             }
         }
+        
+        info!("⚖️ Weighted load balancing enabled");
     }
 
-    backends
+    (backends, balance_enabled)
 }
 
 pub fn load_health_check_config() -> HealthCheckConfig {

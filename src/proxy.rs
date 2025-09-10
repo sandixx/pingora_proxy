@@ -17,6 +17,7 @@ pub struct MyProxy {
     pub custom_headers: HashMap<String, String>,
     pub remove_headers: Vec<String>,
     pub counter: AtomicUsize,
+    pub round_robin: bool, // Add this field
 }
 
 impl MyProxy {
@@ -27,42 +28,53 @@ impl MyProxy {
         if healthy_backends.is_empty() {
             warn!("⚠️ No healthy backends available, falling back to all backends");
             // Fallback to all backends if none are healthy
-            let total_weight: usize = backends.iter().map(|b| b.weight).sum();
-
-            if total_weight == 0 {
+            if self.round_robin {
+                // Simple round-robin for fallback
+                let index = self.counter.fetch_add(1, Ordering::Relaxed) % backends.len();
+                return backends.get(index).cloned();
+            } else {
+                let total_weight: usize = backends.iter().map(|b| b.weight).sum();
+                if total_weight == 0 {
+                    return backends.first().cloned();
+                }
+                
+                let choice = (self.counter.fetch_add(1, Ordering::Relaxed) % 100) as usize;
+                let mut acc = 0;
+                
+                for b in backends.iter() {
+                    acc += b.weight;
+                    if choice < acc {
+                        return Some(b.clone());
+                    }
+                }
                 return backends.first().cloned();
             }
-            
+        }
+
+        if self.round_robin {
+            // Simple round-robin selection from healthy backends
+            let index = self.counter.fetch_add(1, Ordering::Relaxed) % healthy_backends.len();
+            return Some(healthy_backends[index].clone());
+        } else {
+            // Weighted selection
+            let total_weight: usize = healthy_backends.iter().map(|b| b.weight).sum();
+
+            if total_weight == 0 {
+                return healthy_backends.first().cloned().cloned();
+            }
+
             let choice = (self.counter.fetch_add(1, Ordering::Relaxed) % 100) as usize;
             let mut acc = 0;
             
-            for b in backends.iter() {
+            for b in &healthy_backends {
                 acc += b.weight;
                 if choice < acc {
-                    return Some(b.clone());
+                    return Some((*b).clone());
                 }
             }
-            return backends.first().cloned();
+            
+            healthy_backends.first().cloned().cloned()
         }
-
-        let total_weight: usize = healthy_backends.iter().map(|b| b.weight).sum();
-
-        if total_weight == 0 {
-            return healthy_backends.first().cloned().cloned();
-        }
-
-        let choice = (self.counter.fetch_add(1, Ordering::Relaxed) % 100) as usize;
-        let mut acc = 0;
-        
-        // Iterate over a reference to avoid moving the vector
-        for b in &healthy_backends {
-            acc += b.weight;
-            if choice < acc {
-                return Some((*b).clone());
-            }
-        }
-        
-        healthy_backends.first().cloned().cloned()
     }
 }
 
