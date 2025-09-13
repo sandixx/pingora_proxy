@@ -24,3 +24,4 @@ rand = "0.8.5"
 uuid = { version = "1.0", features = ["v4"] }
 chrono = { version = "0.4", features = ["clock"] }
 openssl = "0.10.73"
+signal-hook = "0.3.18"

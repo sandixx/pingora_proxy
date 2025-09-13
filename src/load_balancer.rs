@@ -15,7 +15,7 @@ pub enum LoadBalanceStrategy {
 }
 
 impl LoadBalanceStrategy {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn _from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "round_robin" | "round-robin" | "roundrobin" => Some(Self::RoundRobin),
             "weighted" => Some(Self::Weighted),

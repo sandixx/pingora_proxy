@@ -6,13 +6,12 @@ use pingora_http::{ResponseHeader, RequestHeader};
 use pingora_proxy::{ProxyHttp, Session};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 use crate::backend::Backend;
 use crate::load_balancer::{LoadBalancer, LoadBalanceStrategy};
 
 pub struct MyProxy {
-    pub backends: Arc<RwLock<Vec<Backend>>>,
+    pub backends: Arc<std::sync::RwLock<Vec<Backend>>>,
     pub load_balancer: Arc<LoadBalancer>,
     pub ssl_enabled: bool,
     pub custom_headers: HashMap<String, String>,
@@ -48,10 +47,8 @@ impl ProxyHttp for MyProxy {
     }
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
-        // Check for existing session cookie
         let existing_session_id = self.get_session_id(session.req_header());
         
-        // If sticky sessions enabled and no session ID, generate one
         if self.load_balancer.strategy == LoadBalanceStrategy::StickySession && existing_session_id.is_none() {
             *ctx = Some(LoadBalancer::generate_session_id());
         }
@@ -81,9 +78,8 @@ impl ProxyHttp for MyProxy {
     }
 
     async fn upstream_peer(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<Box<HttpPeer>> {
-        let backends = self.backends.read().await;
+        let backends = self.backends.read().unwrap();
         
-        // Determine session ID for sticky sessions
         let session_id = if self.load_balancer.strategy == LoadBalanceStrategy::StickySession {
             self.get_session_id(session.req_header()).or_else(|| ctx.clone())
         } else {
@@ -109,9 +105,7 @@ impl ProxyHttp for MyProxy {
     }
 
     async fn response_filter(&self, _session: &mut Session, upstream_response: &mut ResponseHeader, ctx: &mut Self::CTX, ) -> Result<()> {
-        // Set session cookie if we generated a new session ID
         if let Some(session_id) = ctx.take() {
-            // Format expiry timestamp (for Expires=)
             use chrono::{Utc, Duration};
             let expire_time = Utc::now() + Duration::seconds(self.sticky_session_ttl as i64);
             let expires_str = expire_time.format("%a, %d %b %Y %H:%M:%S GMT").to_string();

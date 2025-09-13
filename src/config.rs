@@ -5,17 +5,29 @@ use std::collections::HashMap;
 use log::{self, info, warn};
 
 use crate::backend::Backend;
-use crate::health_check::HealthCheckConfig;
 use crate::load_balancer::LoadBalanceStrategy;
+
+#[derive(Debug, Clone)]
+pub struct HealthCheckConfig {
+    pub enabled: bool,
+    pub path: String,
+    pub interval_secs: u64,
+    pub timeout_secs: u64,
+    pub success_codes: Vec<u16>,
+}
 
 pub fn load_balance_strategy() -> LoadBalanceStrategy {
     let strategy_str = env::var("LOAD_BALANCE_STRATEGY")
         .unwrap_or_else(|_| "weighted".to_string())
         .to_lowercase();
     
-    match LoadBalanceStrategy::from_str(&strategy_str) {
-        Some(strategy) => strategy,
-        None => {
+    match strategy_str.as_str() {
+        "round_robin" | "round-robin" | "roundrobin" => LoadBalanceStrategy::RoundRobin,
+        "weighted" => LoadBalanceStrategy::Weighted,
+        "least_connections" | "least-connections" | "leastconnections" => LoadBalanceStrategy::LeastConnections,
+        "sticky_session" | "sticky-session" | "stickysession" => LoadBalanceStrategy::StickySession,
+        "random" => LoadBalanceStrategy::Random,
+        _ => {
             warn!("⚠️ Unknown load balance strategy '{}', defaulting to 'weighted'", strategy_str);
             LoadBalanceStrategy::Weighted
         }
@@ -31,9 +43,8 @@ pub fn load_sticky_session_ttl() -> u64 {
     std::env::var("STICKY_SESSION_TTL")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(3600) // default 1 hour
+        .unwrap_or(3600)
 }
-
 
 pub fn load_backends() -> Vec<Backend> {
     let mut backends = Vec::new();
@@ -189,56 +200,74 @@ pub struct GenerateSslStatus {
     pub error: String,
 }
 
-pub fn generate_ssl () -> GenerateSslStatus {
+pub fn generate_ssl() -> GenerateSslStatus {
     match Command::new("mkdir").args(&["-p", "ssl"]).status() {
         Ok(status) if status.success() => {
-            println!("Created ssl directory.");
+            info!("Created ssl directory.");
         }
         Ok(status) => {
-            return GenerateSslStatus {status: "Errorr". to_string(), error: format!("mkdir failed with status: {}", status)};
+            return GenerateSslStatus {status: "Error".to_string(), error: format!("mkdir failed with status: {}", status)};
         }
         Err(err) => {
-            return GenerateSslStatus {status: "Errorr". to_string(), error: format!("Failed to create ssl directory: {}", err)};
+            return GenerateSslStatus {status: "Error".to_string(), error: format!("Failed to create ssl directory: {}", err)};
         }
     }
 
-    // openssl genrsa -out ssl/server.key 2048
-    match Command::new("openssl")
-        .args(&["genrsa", "-out", "ssl/server.key", "2048"])
-        .status()
-    {
-        Ok(status) if status.success() => {
-            println!("Generated private key.");
-        }
-        Ok(status) => {
-            return GenerateSslStatus {status: "Errorr". to_string(), error: format!("openssl genrsa failed with status: {}", status)};
-        }
-        Err(err) => {
-            return GenerateSslStatus {status: "Errorr". to_string(), error: format!("Failed to run openssl genrsa: {}", err)};
-        }
-    }
-
-    // openssl req -new -x509 -sha256 -key ssl/server.key -out ssl/server.pem -days 365 -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost"
     match Command::new("openssl")
         .args(&[
-            "req", "-new", "-x509", "-sha256",
-            "-key", "ssl/server.key",
+            "req", "-x509", "-newkey", "rsa:2048",
+            "-keyout", "ssl/server.key",
             "-out", "ssl/server.pem",
             "-days", "365",
-            "-subj", "/C=US/ST=State/L=City/O=Organization/CN=localhost",
+            "-nodes",
+            "-subj", "/C=ID/ST=NorthSumatera/L=Medan/O=Organization/CN=localhost",
         ])
         .status()
     {
         Ok(status) if status.success() => {
-            println!("Generated self-signed certificate.");
+            info!("Generated private key and certificate.");
         }
         Ok(status) => {
-            return GenerateSslStatus {status: "Errorr". to_string(), error: format!("openssl req failed with status: {}", status)};
+            return GenerateSslStatus {status: "Error".to_string(), error: format!("openssl req failed with status: {}", status)};
         }
         Err(err) => {
-            return GenerateSslStatus {status: "Errorr". to_string(), error: format!("Failed to run openssl req: {}", err)};
+            return GenerateSslStatus {status: "Error".to_string(), error: format!("Failed to run openssl req: {}", err)};
         }
     }
 
-    GenerateSslStatus {status: "Success". to_string(), error: "".to_string()}
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions("ssl/server.key", std::fs::Permissions::from_mode(0o600)) {
+            warn!("Failed to set permissions on private key: {}", e);
+        }
+    }
+
+    if let Err(e) = verify_ssl_files() {
+        return GenerateSslStatus {status: "Error".to_string(), error: format!("Generated SSL files are invalid: {}", e)};
+    }
+
+    GenerateSslStatus {status: "Success".to_string(), error: "".to_string()}
+}
+
+fn verify_ssl_files() -> Result<(), String> {
+    let key_output = Command::new("openssl")
+        .args(&["rsa", "-in", "ssl/server.key", "-check", "-noout"])
+        .output()
+        .map_err(|e| format!("Failed to verify private key: {}", e))?;
+    
+    if !key_output.status.success() {
+        return Err(format!("Private key is invalid: {}", String::from_utf8_lossy(&key_output.stderr)));
+    }
+
+    let cert_output = Command::new("openssl")
+        .args(&["x509", "-in", "ssl/server.pem", "-noout"])
+        .output()
+        .map_err(|e| format!("Failed to verify certificate: {}", e))?;
+    
+    if !cert_output.status.success() {
+        return Err(format!("Certificate is invalid: {}", String::from_utf8_lossy(&cert_output.stderr)));
+    }
+
+    Ok(())
 }
