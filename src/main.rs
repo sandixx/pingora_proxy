@@ -56,7 +56,7 @@ fn load_tls_settings(cert_path: &str, key_path: &str) -> TlsSettings {
 }
 
 fn main() {
-    dotenvy::from_filename(".env").expect("⚠️ .env file not found!");
+    dotenvy::dotenv().ok();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let args = Args::from_args();
