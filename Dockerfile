@@ -19,7 +19,7 @@ RUN echo "nameserver 8.8.8.8" > /resolv.conf && \
 
 FROM debian:bookworm-slim AS tzdata
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tzdata && \
+    libssl3 tzdata && \
     rm -rf /var/lib/apt/lists/*
 
 # Final stage
@@ -36,6 +36,10 @@ COPY --from=builder /lib/x86_64-linux-gnu/libpthread.so.0 /lib/x86_64-linux-gnu/
 COPY --from=builder /lib/x86_64-linux-gnu/libm.so.6 /lib/x86_64-linux-gnu/libm.so.6
 COPY --from=builder /lib/x86_64-linux-gnu/libgcc_s.so.1 /lib/x86_64-linux-gnu/libgcc_s.so.1
 COPY --from=builder /lib64/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
+
+# Copy OpenSSL runtime libraries
+COPY --from=deps /usr/lib/x86_64-linux-gnu/libssl.so.3 /usr/lib/x86_64-linux-gnu/libssl.so.3
+COPY --from=deps /usr/lib/x86_64-linux-gnu/libcrypto.so.3 /usr/lib/x86_64-linux-gnu/libcrypto.so.3
 
 # Copy CA certificates for SSL/TLS
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt

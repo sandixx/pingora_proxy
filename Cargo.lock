@@ -1675,6 +1675,7 @@ dependencies = [
  "env_logger",
  "futures",
  "log",
+ "openssl",
  "pingora",
  "pingora-core",
  "pingora-http",

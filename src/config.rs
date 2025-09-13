@@ -1,6 +1,8 @@
 use std::env;
+use std::path::Path;
+use std::process::{self, Command};
 use std::collections::HashMap;
-use log::{self, warn};
+use log::{self, info, warn};
 
 use crate::backend::Backend;
 use crate::health_check::HealthCheckConfig;
@@ -139,16 +141,104 @@ pub fn get_proxy_port(args_proxy_port: Option<u16>) -> u16 {
     })
 }
 
-pub fn is_ssl_enabled() -> bool {
-    env::var("SSL")
-        .unwrap_or_else(|_| "OFF".to_string())
-        .to_uppercase() == "ON"
+pub struct SslEnabled {
+    pub status: bool,
+    pub cert_loc: String,
+    pub key_loc: String,
 }
 
-pub fn get_ssl_cert() -> String {
-    env::var("SSL_CERT").unwrap_or_else(|_| "ssl/server.pem".to_string())
+pub fn is_ssl_enabled() -> SslEnabled {
+    let ssl = env::var("SSL").unwrap_or_else(|_| "OFF".to_string()).to_uppercase() == "ON";
+    let cert_loc = "ssl/server.pem".to_string();
+    let key_loc = "ssl/server.key".to_string();
+    let cert = Path::new(&cert_loc);
+    let key = Path::new(&key_loc);
+
+    if ssl {
+        if !cert.exists() || !key.exists() {
+            let gen_ssl = generate_ssl();
+
+            if gen_ssl.status != "Success".to_string() {
+                warn!("{}", gen_ssl.error);
+                process::exit(1);
+            }
+
+            info!("SSL Generated !!!");
+        }
+    }
+
+    if !cert.exists() {
+        warn!("SSL CERT is not exist!");
+        process::exit(1);
+    }
+
+    if !key.exists() {
+        warn!("SSL KEY is not exist!");
+        process::exit(1);
+    }
+
+    SslEnabled {
+        status: ssl,
+        cert_loc: "ssl/server.pem".to_string(),
+        key_loc: "ssl/server.key".to_string(),
+    }
 }
 
-pub fn get_ssl_key() -> String {
-    env::var("SSL_KEY").unwrap_or_else(|_| "ssl/server.key".to_string())
+pub struct GenerateSslStatus {
+    pub status: String,
+    pub error: String,
+}
+
+pub fn generate_ssl () -> GenerateSslStatus {
+    match Command::new("mkdir").args(&["-p", "ssl"]).status() {
+        Ok(status) if status.success() => {
+            println!("Created ssl directory.");
+        }
+        Ok(status) => {
+            return GenerateSslStatus {status: "Errorr". to_string(), error: format!("mkdir failed with status: {}", status)};
+        }
+        Err(err) => {
+            return GenerateSslStatus {status: "Errorr". to_string(), error: format!("Failed to create ssl directory: {}", err)};
+        }
+    }
+
+    // openssl genrsa -out ssl/server.key 2048
+    match Command::new("openssl")
+        .args(&["genrsa", "-out", "ssl/server.key", "2048"])
+        .status()
+    {
+        Ok(status) if status.success() => {
+            println!("Generated private key.");
+        }
+        Ok(status) => {
+            return GenerateSslStatus {status: "Errorr". to_string(), error: format!("openssl genrsa failed with status: {}", status)};
+        }
+        Err(err) => {
+            return GenerateSslStatus {status: "Errorr". to_string(), error: format!("Failed to run openssl genrsa: {}", err)};
+        }
+    }
+
+    // openssl req -new -x509 -sha256 -key ssl/server.key -out ssl/server.pem -days 365 -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost"
+    match Command::new("openssl")
+        .args(&[
+            "req", "-new", "-x509", "-sha256",
+            "-key", "ssl/server.key",
+            "-out", "ssl/server.pem",
+            "-days", "365",
+            "-subj", "/C=US/ST=State/L=City/O=Organization/CN=localhost",
+        ])
+        .status()
+    {
+        Ok(status) if status.success() => {
+            println!("Generated self-signed certificate.");
+        }
+        Ok(status) => {
+            return GenerateSslStatus {status: "Errorr". to_string(), error: format!("openssl req failed with status: {}", status)};
+        }
+        Err(err) => {
+            return GenerateSslStatus {status: "Errorr". to_string(), error: format!("Failed to run openssl req: {}", err)};
+        }
+    }
+
+    GenerateSslStatus {status: "Success". to_string(), error: "".to_string()}
 }

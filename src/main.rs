@@ -34,9 +34,7 @@ fn main() {
     let args = Args::from_args();
 
     let proxy_port = get_proxy_port(args.proxy_port);
-    let ssl_enabled = is_ssl_enabled();
-    let ssl_cert = get_ssl_cert();
-    let ssl_key = get_ssl_key();
+    let ssl = is_ssl_enabled();
 
     let backends = load_backends();
     let custom_headers = load_custom_headers();
@@ -96,7 +94,7 @@ fn main() {
     let proxy = MyProxy {
         backends: shared_backends,
         load_balancer,
-        ssl_enabled,
+        ssl_enabled: ssl.status,
         custom_headers,
         remove_headers,
         sticky_cookie_name,
@@ -105,17 +103,17 @@ fn main() {
 
     let mut proxy_service = http_proxy_service(&my_server.configuration, proxy);
 
-    if ssl_enabled {
-        if !std::path::Path::new(&ssl_cert).exists() {
-            panic!("SSL certificate not found: {}", ssl_cert);
+    if ssl.status {
+        if !std::path::Path::new(&ssl.cert_loc).exists() {
+            panic!("SSL certificate not found: {}", ssl.cert_loc);
         }
-        if !std::path::Path::new(&ssl_key).exists() {
-            panic!("SSL private key not found: {}", ssl_key);
+        if !std::path::Path::new(&ssl.key_loc).exists() {
+            panic!("SSL private key not found: {}", ssl.key_loc);
         }
 
         info!("🔒 SSL/TLS enabled");
         proxy_service
-            .add_tls(&format!("0.0.0.0:{}", proxy_port), &ssl_cert, &ssl_key)
+            .add_tls(&format!("0.0.0.0:{}", proxy_port), &ssl.cert_loc, &ssl.key_loc)
             .unwrap();
     } else {
         info!("🔓 SSL/TLS disabled - using HTTP");
