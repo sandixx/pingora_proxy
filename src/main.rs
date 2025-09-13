@@ -14,12 +14,14 @@ mod health_check;
 mod load_balancer;
 mod proxy;
 mod ssl_watcher;
+mod generate_ssl;
 
 use config::*;
 use health_check::HealthChecker;
 use load_balancer::LoadBalancer;
 use proxy::MyProxy;
 use ssl_watcher::check_cert;
+use generate_ssl::generate_cert;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "pingora-proxy")]
@@ -44,7 +46,7 @@ fn load_tls_settings(cert_path: &str, key_path: &str) -> TlsSettings {
         Err(e) => {
             warn!("Failed to load TLS settings: {}, regenerating SSL...", e);
             
-            let gen_ssl = generate_ssl();
+            let gen_ssl = generate_cert();
             if gen_ssl.status != "Success" {
                 panic!("Failed to regenerate SSL: {}", gen_ssl.error);
             }
@@ -106,7 +108,7 @@ fn main() {
                 }
                 if day_cert.day_left <= 1 {
                     warn!("⚠️ Cert about to expire, reloading...");
-                    let gen_ssl = generate_ssl();
+                    let gen_ssl = generate_cert();
 
                     if gen_ssl.status != "Success".to_string() {
                         warn!("{}", gen_ssl.error);

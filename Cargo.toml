@@ -25,3 +25,7 @@ uuid = { version = "1.0", features = ["v4"] }
 chrono = { version = "0.4", features = ["clock"] }
 openssl = "0.10.73"
 signal-hook = "0.3.18"
+time = "0.3.43"
+rcgen = "0.9"
+pem = "3.0"
+x509-parser = "0.15"

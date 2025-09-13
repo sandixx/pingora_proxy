@@ -85,14 +85,6 @@ pub fn check_cert() -> SslWatcher {
     let duration = not_after_datetime - now;
     let days_left = duration.num_days() as i32;
 
-    if days_left < 0 {
-        return SslWatcher {
-            is_good: false,
-            day_left: days_left,
-            error: format!("Certificate expired {} days ago", days_left.abs()),
-        };
-    }
-
     SslWatcher {
         is_good: true,
         day_left: days_left,

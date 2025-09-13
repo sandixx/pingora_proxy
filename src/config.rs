@@ -1,10 +1,11 @@
 use std::env;
 use std::path::Path;
-use std::process::{self, Command};
+use std::process::{self};
 use std::collections::HashMap;
 use log::{self, info, warn};
 
 use crate::backend::Backend;
+use crate::generate_ssl::generate_cert;
 use crate::load_balancer::LoadBalanceStrategy;
 
 #[derive(Debug, Clone)]
@@ -167,7 +168,7 @@ pub fn is_ssl_enabled() -> SslEnabled {
 
     if ssl {
         if !cert.exists() || !key.exists() {
-            let gen_ssl = generate_ssl();
+            let gen_ssl = generate_cert();
 
             if gen_ssl.status != "Success".to_string() {
                 warn!("{}", gen_ssl.error);
@@ -195,79 +196,79 @@ pub fn is_ssl_enabled() -> SslEnabled {
     }
 }
 
-pub struct GenerateSslStatus {
-    pub status: String,
-    pub error: String,
-}
+// pub struct GenerateSslStatus {
+//     pub status: String,
+//     pub error: String,
+// }
 
-pub fn generate_ssl() -> GenerateSslStatus {
-    match Command::new("mkdir").args(&["-p", "ssl"]).status() {
-        Ok(status) if status.success() => {
-            info!("Created ssl directory.");
-        }
-        Ok(status) => {
-            return GenerateSslStatus {status: "Error".to_string(), error: format!("mkdir failed with status: {}", status)};
-        }
-        Err(err) => {
-            return GenerateSslStatus {status: "Error".to_string(), error: format!("Failed to create ssl directory: {}", err)};
-        }
-    }
+// pub fn generate_ssl() -> GenerateSslStatus {
+//     match Command::new("mkdir").args(&["-p", "ssl"]).status() {
+//         Ok(status) if status.success() => {
+//             info!("Created ssl directory.");
+//         }
+//         Ok(status) => {
+//             return GenerateSslStatus {status: "Error".to_string(), error: format!("mkdir failed with status: {}", status)};
+//         }
+//         Err(err) => {
+//             return GenerateSslStatus {status: "Error".to_string(), error: format!("Failed to create ssl directory: {}", err)};
+//         }
+//     }
 
-    match Command::new("openssl")
-        .args(&[
-            "req", "-x509", "-newkey", "rsa:2048",
-            "-keyout", "ssl/server.key",
-            "-out", "ssl/server.pem",
-            "-days", "365",
-            "-nodes",
-            "-subj", "/C=ID/ST=NorthSumatera/L=Medan/O=Organization/CN=localhost",
-        ])
-        .status()
-    {
-        Ok(status) if status.success() => {
-            info!("Generated private key and certificate.");
-        }
-        Ok(status) => {
-            return GenerateSslStatus {status: "Error".to_string(), error: format!("openssl req failed with status: {}", status)};
-        }
-        Err(err) => {
-            return GenerateSslStatus {status: "Error".to_string(), error: format!("Failed to run openssl req: {}", err)};
-        }
-    }
+//     match Command::new("openssl")
+//         .args(&[
+//             "req", "-x509", "-newkey", "rsa:2048",
+//             "-keyout", "ssl/server.key",
+//             "-out", "ssl/server.pem",
+//             "-days", "365",
+//             "-nodes",
+//             "-subj", "/C=ID/ST=NorthSumatera/L=Medan/O=Organization/CN=localhost",
+//         ])
+//         .status()
+//     {
+//         Ok(status) if status.success() => {
+//             info!("Generated private key and certificate.");
+//         }
+//         Ok(status) => {
+//             return GenerateSslStatus {status: "Error".to_string(), error: format!("openssl req failed with status: {}", status)};
+//         }
+//         Err(err) => {
+//             return GenerateSslStatus {status: "Error".to_string(), error: format!("Failed to run openssl req: {}", err)};
+//         }
+//     }
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Err(e) = std::fs::set_permissions("ssl/server.key", std::fs::Permissions::from_mode(0o600)) {
-            warn!("Failed to set permissions on private key: {}", e);
-        }
-    }
+//     #[cfg(unix)]
+//     {
+//         use std::os::unix::fs::PermissionsExt;
+//         if let Err(e) = std::fs::set_permissions("ssl/server.key", std::fs::Permissions::from_mode(0o600)) {
+//             warn!("Failed to set permissions on private key: {}", e);
+//         }
+//     }
 
-    if let Err(e) = verify_ssl_files() {
-        return GenerateSslStatus {status: "Error".to_string(), error: format!("Generated SSL files are invalid: {}", e)};
-    }
+//     if let Err(e) = verify_ssl_files() {
+//         return GenerateSslStatus {status: "Error".to_string(), error: format!("Generated SSL files are invalid: {}", e)};
+//     }
 
-    GenerateSslStatus {status: "Success".to_string(), error: "".to_string()}
-}
+//     GenerateSslStatus {status: "Success".to_string(), error: "".to_string()}
+// }
 
-fn verify_ssl_files() -> Result<(), String> {
-    let key_output = Command::new("openssl")
-        .args(&["rsa", "-in", "ssl/server.key", "-check", "-noout"])
-        .output()
-        .map_err(|e| format!("Failed to verify private key: {}", e))?;
+// fn verify_ssl_files() -> Result<(), String> {
+//     let key_output = Command::new("openssl")
+//         .args(&["rsa", "-in", "ssl/server.key", "-check", "-noout"])
+//         .output()
+//         .map_err(|e| format!("Failed to verify private key: {}", e))?;
     
-    if !key_output.status.success() {
-        return Err(format!("Private key is invalid: {}", String::from_utf8_lossy(&key_output.stderr)));
-    }
+//     if !key_output.status.success() {
+//         return Err(format!("Private key is invalid: {}", String::from_utf8_lossy(&key_output.stderr)));
+//     }
 
-    let cert_output = Command::new("openssl")
-        .args(&["x509", "-in", "ssl/server.pem", "-noout"])
-        .output()
-        .map_err(|e| format!("Failed to verify certificate: {}", e))?;
+//     let cert_output = Command::new("openssl")
+//         .args(&["x509", "-in", "ssl/server.pem", "-noout"])
+//         .output()
+//         .map_err(|e| format!("Failed to verify certificate: {}", e))?;
     
-    if !cert_output.status.success() {
-        return Err(format!("Certificate is invalid: {}", String::from_utf8_lossy(&cert_output.stderr)));
-    }
+//     if !cert_output.status.success() {
+//         return Err(format!("Certificate is invalid: {}", String::from_utf8_lossy(&cert_output.stderr)));
+//     }
 
-    Ok(())
-}
+//     Ok(())
+// }
